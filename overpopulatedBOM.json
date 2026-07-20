@@ -1,0 +1,63 @@
+{
+    "dataShape": {
+        "fieldDefinitions": {
+            "whirlpoolP_N": {
+                "name": "whirlpoolP_N",
+                "description": "",
+                "baseType": "STRING",
+                "ordinal": 1,
+                "aspects": {}
+            },
+            "description": {
+                "name": "description",
+                "description": "",
+                "baseType": "STRING",
+                "ordinal": 3,
+                "aspects": {}
+            },
+            "componentClass": {
+                "name": "componentClass",
+                "description": "",
+                "baseType": "STRING",
+                "ordinal": 4,
+                "aspects": {}
+            },
+            "totalPopQty": {
+                "name": "totalPopQty",
+                "description": "",
+                "baseType": "STRING",
+                "ordinal": 5,
+                "aspects": {}
+            },
+            "oid": {
+                "name": "oid",
+                "description": "",
+                "baseType": "STRING",
+                "ordinal": 6,
+                "aspects": {}
+            },
+            "sortOrderRefDes": {
+                "name": "sortOrderRefDes",
+                "description": "",
+                "baseType": "STRING",
+                "ordinal": 6,
+                "aspects": {}
+            },
+            "W11512873 RefDes": {
+                "name": "W11512873 RefDes",
+                "description": "",
+                "baseType": "STRING",
+                "ordinal": 7,
+                "aspects": {}
+            },
+            "W11512873 Qty": {
+                "name": "W11512873 Qty",
+                "description": "",
+                "baseType": "STRING",
+                "ordinal": 8,
+                "aspects": {}
+            }
+        }
+    },
+    "rows": []
+}
