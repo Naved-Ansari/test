@@ -207,10 +207,13 @@ try
 
         // OPT-4: Pre-build masterBom lookup map for totalPopQty — O(1) instead of EQFilter per part
         var masterBomQtyMap = {};
-        for (i = 0; i < masterBom.rows.length; i++) {
-            row = masterBom.rows[i];
-            if (!masterBomQtyMap[row.whirlpoolP_N]) {
-                masterBomQtyMap[row.whirlpoolP_N] = row.quantity;
+        if (masterBom !== undefined && masterBom !== null && masterBom.rows !== undefined) {
+            for (i = 0; i < masterBom.rows.length; i++) {
+                row = masterBom.rows[i];
+                var pNo = String(row.whirlpoolP_N);
+                if (pNo && pNo !== "undefined" && masterBomQtyMap[pNo] === undefined) {
+                    masterBomQtyMap[pNo] = row.quantity;
+                }
             }
         }
 
@@ -306,8 +309,9 @@ try
             //logger.info(" consolidatedBomRow " + consolidatedBomRow.whirlpoolP_N + "," + consolidatedBomRow.componentClass + "," + consolidatedBomRow.oid);
 
             // OPT-4: Use pre-built masterBom map instead of EQFilter per part
-            if (masterBomQtyMap[consolidatedBomRow.whirlpoolP_N] !== undefined) {
-                newEntry.totalPopQty = masterBomQtyMap[consolidatedBomRow.whirlpoolP_N];
+            var masterPartNo = String(consolidatedBomRow.whirlpoolP_N);
+            if (masterBomQtyMap[masterPartNo] !== undefined) {
+                newEntry.totalPopQty = masterBomQtyMap[masterPartNo];
             }
 
             // add cCritical parts in a seprate table 
