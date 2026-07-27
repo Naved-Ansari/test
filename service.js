@@ -5,8 +5,7 @@ LastEdited: 27 July, 2026
 ChangeLog: Performance optimization - replaced O(n²) InfoTable queries with hash-map lookups
 */
 
-try 
-{
+try {
     var result, reA, reN, aA, bA, aN, bN, params;
     var z, x, i, j, k, sort, row, row1, row3, keyC;
     var refArray, refDesForTPQ = "0";
@@ -31,18 +30,15 @@ try
     reA = /[^a-zA-Z]/g;
     reN = /[^0-9]/g;
 
-    function sortAlphaNum(a, b) 
-    {
+    function sortAlphaNum(a, b) {
         aA = a.replace(reA, "");
         bA = b.replace(reA, "");
-        if (aA === bA) 
-        {
+        if (aA === bA) {
             aN = parseInt(a.replace(reN, ""), 10);
             bN = parseInt(b.replace(reN, ""), 10);
             return aN === bN ? 0 : aN > bN ? 1 : -1;
-        } 
-        else 
-        {
+        }
+        else {
             return aA > bA ? 1 : -1;
         }
     }
@@ -53,26 +49,23 @@ try
     finalTable = Resources["InfoTableFunctions"].CreateInfoTable(params);
 
 
-    if (masterOid !== undefined && masterOid !== "") 
-    {
-        try 
-        {
+    if (masterOid !== undefined && masterOid !== "") {
+        try {
             //get Master Bom
             masterBom = me.getBomInfotableForPrototypeBom({
                 WTPartOid: masterOid /* STRING */
             });
-        } 
-        catch (err) 
-        {
+        }
+        catch (err) {
             logger.error("Can't get master BOM from WC" + err);
         }
 
         //step 2: Create string of all Ref des Which Are CCritical
         //get All C-Crititcal Components From ECAD BOM
         params = {
-            fieldName: "componentClass" /* STRING */ ,
-            isCaseSensitive: true /* BOOLEAN */ ,
-            t: masterBom /* INFOTABLE */ ,
+            fieldName: "componentClass" /* STRING */,
+            isCaseSensitive: true /* BOOLEAN */,
+            t: masterBom /* INFOTABLE */,
             value: "CCRTL" /* STRING */
         };
         ecadcCRTLTable = Resources["InfoTableFunctions"].EQFilter(params);
@@ -129,7 +122,7 @@ try
             selectedVariantInfotable: selectedVariantTable /* INFOTABLE */
         });
         logger.info("1. allBomsInSingleTable END");
-        
+
         allConsolidatedBomsTableLength = allBomsInSingleTable.rows.length;
         for (i = 0; i < allConsolidatedBomsTableLength; i++) {
             allBomsRow = allBomsInSingleTable.rows[i];
@@ -191,9 +184,11 @@ try
         if (masterBom !== undefined && masterBom !== null && masterBom.rows !== undefined) {
             for (i = 0; i < masterBom.rows.length; i++) {
                 row = masterBom.rows[i];
-                var pNo = String(row.whirlpoolP_N);
-                if (pNo && pNo !== "undefined" && masterBomQtyMap[pNo] === undefined) {
-                    masterBomQtyMap[pNo] = row.quantity;
+                if (row.whirlpoolP_N !== undefined && row.whirlpoolP_N !== null) {
+                    var pNo = String(row.whirlpoolP_N).trim().toUpperCase();
+                    if (pNo !== "" && masterBomQtyMap[pNo] === undefined) {
+                        masterBomQtyMap[pNo] = row.quantity;
+                    }
                 }
             }
         }
@@ -217,7 +212,7 @@ try
                     refDesCSV = " ";
 
                     // Sort matching rows by refDes ascending to match original InfoTable Sort behavior
-                    matchingRows.sort(function(a, b) {
+                    matchingRows.sort(function (a, b) {
                         var aVal = a.refDes || "";
                         var bVal = b.refDes || "";
                         return aVal < bVal ? -1 : aVal > bVal ? 1 : 0;
@@ -287,10 +282,26 @@ try
             newEntry.componentClass = consolidatedBomRow.componentClass; // STRING
             newEntry.oid = consolidatedBomRow.oid;
 
-            // OPT-4: Use pre-built masterBom map instead of EQFilter per part
-            var masterPartNo = String(consolidatedBomRow.whirlpoolP_N);
-            if (masterBomQtyMap[masterPartNo] !== undefined) {
-                newEntry.totalPopQty = masterBomQtyMap[masterPartNo];
+            // OPT-4: Use pre-built masterBom map with EQFilter fallback for 100% accuracy
+            var foundQty = false;
+            if (consolidatedBomRow.whirlpoolP_N !== undefined && consolidatedBomRow.whirlpoolP_N !== null) {
+                var masterPartNo = String(consolidatedBomRow.whirlpoolP_N).trim().toUpperCase();
+                if (masterPartNo !== "" && masterBomQtyMap[masterPartNo] !== undefined) {
+                    newEntry.totalPopQty = masterBomQtyMap[masterPartNo];
+                    foundQty = true;
+                }
+            }
+            if (!foundQty && masterBom !== undefined && masterBom !== null && consolidatedBomRow.whirlpoolP_N !== undefined) {
+                params = {
+                    fieldName: "whirlpoolP_N" /* STRING */ ,
+                    isCaseSensitive: undefined /* BOOLEAN */ ,
+                    t: masterBom /* INFOTABLE */ ,
+                    value: consolidatedBomRow.whirlpoolP_N /* STRING */
+                };
+                totalPopulationQtyTable = Resources["InfoTableFunctions"].EQFilter(params);
+                if (totalPopulationQtyTable.rows.length > 0) {
+                    newEntry.totalPopQty = totalPopulationQtyTable.rows[0].quantity;
+                }
             }
 
             // add cCritical parts in a seprate table 
@@ -362,7 +373,7 @@ try
         // OPT-6 & OPT-7: Build axlEntriesMap directly in a single pass without intermediate InfoTable overhead
         var axlCache = {};
         var axlEntriesMap = {};
-		logger.info("2. overpopulatedBOM LOOP START");
+        logger.info("2. overpopulatedBOM LOOP START");
         for (x = 0; x < overpopulatedBOM.rows.length; x++) {
             row1 = overpopulatedBOM.rows[x];
             var mapKey = row1.whirlpoolP_N + "|" + row1.componentClass;
@@ -388,7 +399,7 @@ try
                 var axlCacheKey = row1.oid + "|" + row1.whirlpoolP_N;
                 if (axlCache[axlCacheKey] === undefined) {
                     axlCache[axlCacheKey] = Things["WHR.PrototypeBomThing_AtosSyntel"].getAxlEntries({
-                        partOid: row1.oid /* STRING */ ,
+                        partOid: row1.oid /* STRING */,
                         partNumber: row1.whirlpoolP_N
                     });
                 }
@@ -414,10 +425,10 @@ try
                 }
             }
         }
-		logger.info("2. overpopulatedBOM LOOP END");
+        logger.info("2. overpopulatedBOM LOOP END");
 
         finalTable = Things["WHR.PrototypeBomThing_AtosSyntel"].getDynamicInfotableFinalTable({
-            supplierCount: supplierCount /* INTEGER */ ,
+            supplierCount: supplierCount /* INTEGER */,
             allVariantTable: allSelectedVariantsTable /* INFOTABLE */
         });
 
@@ -465,9 +476,8 @@ try
         finalTable.AddRow(newEntry);
     }
     result = finalTable;
-} 
-catch (err) 
-{
+}
+catch (err) {
     let errMsg = "Thing [{}] Service [{}] error at line [{}] : {}";
     logger.error(errMsg, me.name, err.fileName, err.lineNumber, err);
 }
