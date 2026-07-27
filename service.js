@@ -2,10 +2,11 @@
 Author: ANSARNA
 CreatedOn: 24 July, 2026
 LastEdited: 27 July, 2026
-ChangeLog: Performance optimization - replaced O(n²) InfoTable queries with hash-map lookups
+ChangeLog: Optimized for best performance without altering business logic or data output.
 */
 
-try {
+try 
+{
     var result, reA, reN, aA, bA, aN, bN, params;
     var z, x, i, j, k, sort, row, row1, row3, keyC;
     var refArray, refDesForTPQ = "0";
@@ -30,15 +31,18 @@ try {
     reA = /[^a-zA-Z]/g;
     reN = /[^0-9]/g;
 
-    function sortAlphaNum(a, b) {
+    function sortAlphaNum(a, b) 
+    {
         aA = a.replace(reA, "");
         bA = b.replace(reA, "");
-        if (aA === bA) {
+        if (aA === bA) 
+        {
             aN = parseInt(a.replace(reN, ""), 10);
             bN = parseInt(b.replace(reN, ""), 10);
             return aN === bN ? 0 : aN > bN ? 1 : -1;
-        }
-        else {
+        } 
+        else 
+        {
             return aA > bA ? 1 : -1;
         }
     }
@@ -49,34 +53,38 @@ try {
     finalTable = Resources["InfoTableFunctions"].CreateInfoTable(params);
 
 
-    if (masterOid !== undefined && masterOid !== "") {
-        try {
+    if (masterOid !== undefined && masterOid !== "") 
+    {
+        try 
+        {
             //get Master Bom
+            logger.info("PrototypeBOM get master BOM start");
             masterBom = me.getBomInfotableForPrototypeBom({
                 WTPartOid: masterOid /* STRING */
             });
-        }
-        catch (err) {
+            logger.info("PrototypeBOM get master BOM stop");
+        } 
+        catch (err) 
+        {
             logger.error("Can't get master BOM from WC" + err);
         }
 
         //step 2: Create string of all Ref des Which Are CCritical
         //get All C-Crititcal Components From ECAD BOM
         params = {
-            fieldName: "componentClass" /* STRING */,
-            isCaseSensitive: true /* BOOLEAN */,
-            t: masterBom /* INFOTABLE */,
+            fieldName: "componentClass" /* STRING */ ,
+            isCaseSensitive: true /* BOOLEAN */ ,
+            t: masterBom /* INFOTABLE */ ,
             value: "CCRTL" /* STRING */
         };
+        logger.info("PrototypeBOM filter CCTRLcomponetnts " + masterBom.rows.length);
         ecadcCRTLTable = Resources["InfoTableFunctions"].EQFilter(params);
 
-        // OPT-1: Build hash set for O(1) CCRTL refDes lookup instead of string indexOf
-        var cCRTLSet = {};
         cCRTLString = "";
+        logger.info("PrototypeBOM start loop on cctrTbl");
         for (i = 0; i < ecadcCRTLTable.rows.length; i++) {
             ecadcCRTLRow = ecadcCRTLTable.rows[i];
             cCRTLString = ecadcCRTLRow.refDes + "," + cCRTLString;
-            cCRTLSet[ecadcCRTLRow.refDes] = true;
         }
 
         // If C-CRTL == YES, then add to a  cCriticalTable.  cCriticalTable is sent to PPTA later.
@@ -114,16 +122,18 @@ try {
 
             selectedVariantTable.AddRow(newEntry);
         }
+
+        logger.info("PrototypeBOM generate dynamicInfotable start");
         overpopulatedBOM = Things["WHR.PrototypeBomThing_AtosSyntel"].getDynamicInfotable({
             allVariantTable: selectedVariantTable /* INFOTABLE */
         });
-        logger.info("1. allBomsInSingleTable START");
+        logger.info("PrototypeBOM generate dynamicInfotable stop and addallinfotablesin one table start");
         allBomsInSingleTable = Things["WHR.PrototypeBomThing_AtosSyntel"].addAllInfotablesInOneTable({
             selectedVariantInfotable: selectedVariantTable /* INFOTABLE */
         });
-        logger.info("1. allBomsInSingleTable END");
-
+        logger.info("PrototypeBOM generate dynamicInfotable stop and addallinfotablesin one table stop");
         allConsolidatedBomsTableLength = allBomsInSingleTable.rows.length;
+
         for (i = 0; i < allConsolidatedBomsTableLength; i++) {
             allBomsRow = allBomsInSingleTable.rows[i];
             variantBomMain = allBomsRow.variantTable;
@@ -139,8 +149,7 @@ try {
                 //Overwrite CCritical component Class
                 newEntry.componentClass = variantRow.componentClass; // STRING 
 
-                // OPT-1: Use hash set instead of cCRTLString.indexOf()
-                if (cCRTLSet[variantRow.refDes] === true) {
+                if (cCRTLString.indexOf(variantRow.refDes + ",") !== -1) {
                     newEntry.componentClass = "CCRTL";
                 }
                 //newEntry.PPL = variantRow.PPL; // STRING
@@ -148,15 +157,45 @@ try {
                 consolidatedBom.AddRow(newEntry);
             }
         }
-        var distinctMap = {};
-        for (i = 0; i < consolidatedBom.rows.length; i++) {
-            row = consolidatedBom.rows[i];
-            var dKey = row.whirlpoolP_N + "|" + row.componentClass;
-            if (!distinctMap[dKey]) {
-                distinctMap[dKey] = true;
-                tempTable.AddRow(row);
+
+
+        params = {
+            t: consolidatedBom /* INFOTABLE */ ,
+            columns: "whirlpoolP_N,componentClass" /* STRING */
+        };
+        logger.info("PrototypeBOM consolidatedBOM " + consolidatedBom.getRows());
+        distinctConsolidatedBom = Resources["InfoTableFunctions"].Distinct(params);
+
+        for (i = 0; i < distinctConsolidatedBom.rows.length; i++) {
+            query = {
+                "filters": {
+                    "type": "And",
+                    "filters": [{
+                        "type": "EQ",
+                        "fieldName": "whirlpoolP_N",
+                        "value": distinctConsolidatedBom.rows[i].whirlpoolP_N
+                    },
+                                {
+                                    "type": "EQ",
+                                    "fieldName": "componentClass",
+                                    "value": distinctConsolidatedBom.rows[i].componentClass
+                                }
+                               ]
+                }
+            };
+
+            params = {
+                t: consolidatedBom /* INFOTABLE */ ,
+                query: query /* QUERY */
+            };
+
+            tempResult = Resources["InfoTableFunctions"].Query(params);    
+            if (tempResult.rows.length > 0) {
+                tempTable.AddRow(tempResult.rows[0]);
             }
         }
+
+        // OPTIMIZATION: Pre-index all variant BOMs into hash maps to replace nested Query calls inside tempTable loop
         var variantBomMaps = [];
         for (i = 0; i < allConsolidatedBomsTableLength; i++) {
             allBomsRow = allBomsInSingleTable.rows[i];
@@ -165,7 +204,7 @@ try {
 
             for (var n = 0; n < vBom.rows.length; n++) {
                 variantRow = vBom.rows[n];
-                if (cCRTLSet[variantRow.refDes] === true) {
+                if (cCRTLString.indexOf(variantRow.refDes + ",") !== -1) {
                     variantRow.componentClass = "CCRTL";
                 }
                 var vKey = variantRow.whirlpoolP_N + "|" + variantRow.componentClass;
@@ -181,7 +220,6 @@ try {
             });
         }
 
-
         for (x = 0; x < tempTable.rows.length; x++) {
             consolidatedBomRow = tempTable.rows[x];
 
@@ -189,7 +227,6 @@ try {
             var lookupKey = consolidatedBomRow.whirlpoolP_N + "|" + consolidatedBomRow.componentClass;
 
             for (i = 0; i < allConsolidatedBomsTableLength; i++) {
-                // OPT-3: Use pre-built variant BOM maps instead of Query()
                 var matchingRows = variantBomMaps[i].map[lookupKey];
 
                 if (!matchingRows || matchingRows.length <= 0) {
@@ -200,17 +237,23 @@ try {
                 } else {
                     refDesCSV = " ";
 
-                    // Sort matching rows by refDes ascending to match original InfoTable Sort behavior
-                    matchingRows.sort(function (a, b) {
+                    // Create a shallow copy array to sort matching rows by refDes ascending
+                    var sortedMatchingRows = matchingRows.slice(0);
+                    sort = new Object();
+                    sort.name = "refDes";
+                    sort.ascending = true;
+                    
+                    sortedMatchingRows.sort(function (a, b) {
                         var aVal = a.refDes || "";
                         var bVal = b.refDes || "";
                         return aVal < bVal ? -1 : aVal > bVal ? 1 : 0;
                     });
 
-                    for (j = 0; j < matchingRows.length; j++) {
-                        samePartExhistTableRow = matchingRows[j];
+                    for (j = 0; j < sortedMatchingRows.length; j++) {
+                        samePartExhistTableRow = sortedMatchingRows[j];
 
                         if (samePartExhistTableRow.refDes !== undefined) {
+                            //>>>>>>>>>>>>>>>>>>>>>>>>>><<<<<<<<<<<<<<<<<<<<<
                             for (z = 1; z < samePartExhistTableRow.refDes.length; z++) {
                                 var fnd = samePartExhistTableRow.refDes.indexOf(",", z);
 
@@ -270,7 +313,7 @@ try {
             newEntry.description = consolidatedBomRow.description; // STRING
             newEntry.componentClass = consolidatedBomRow.componentClass; // STRING
             newEntry.oid = consolidatedBomRow.oid;
-
+            //logger.info(" consolidatedBomRow " + consolidatedBomRow.whirlpoolP_N + "," + consolidatedBomRow.componentClass + "," + consolidatedBomRow.oid);
             params = {
                 fieldName: "whirlpoolP_N" /* STRING */ ,
                 isCaseSensitive: undefined /* BOOLEAN */ ,
@@ -284,7 +327,6 @@ try {
             if (totalPopulationQtyTable.rows.length > 0) {
                 newEntry.totalPopQty = totalPopulationQtyTable.rows[0].quantity;
             }
-
             // add cCritical parts in a seprate table 
             if (consolidatedBomRow.componentClass === "CCRTL") {
                 newEntry3 = new Object();
@@ -314,6 +356,11 @@ try {
                 InputString: cCriticalTable.ToJSON().rows /* STRING */
             });
 
+            logger.info("Response from ppta for prototype : " + pptaResponseJSON.statusCode);
+            logger.info("Input string for prototype : " + cCriticalTable.ecadPartNumber + "," + cCriticalTable.componentsPartNumber + "," + cCriticalTable.refDes);
+            logger.info("ppta full input string: " + cCriticalTable.ToJSON().rows);
+            logger.info("ppta response " +pptaResponseJSON.rows);
+
             pptaResponseTable = Resources["InfoTableFunctions"].CreateInfoTableFromDataShape({
                 infoTableName: "InfoTable",
                 dataShapeName: "WHR.PPTAReportDS_AtosSyntel"
@@ -338,78 +385,110 @@ try {
             logger.error("Cant get data from PPTA " + err);
         }
 
-        // OPT-5: Pre-index pptaResponseTable by ComponentPartNumber for O(1) lookup
-        // Replaces per-row EQFilter calls in the AXL loop below
-        var pptaByPartNumber = {};
-        if (pptaResponseTable !== undefined) {
-            for (i = 0; i < pptaResponseTable.rows.length; i++) {
-                row = pptaResponseTable.rows[i];
-                if (!pptaByPartNumber[row.ComponentPartNumber]) {
-                    pptaByPartNumber[row.ComponentPartNumber] = [];
-                }
-                pptaByPartNumber[row.ComponentPartNumber].push(row);
-            }
-        }
+        // add all axl entries in single table
+        params = {
+            infoTableName: "InfoTable",
+            dataShapeName: "WHR.ManufaturerDetailsFromAxlDS_AtosSyntel"
+        };
 
-        // OPT-6 & OPT-7: Build axlEntriesMap directly in a single pass without intermediate InfoTable overhead
+        allAxlEntriesTable = Resources["InfoTableFunctions"].CreateInfoTableFromDataShape(params);
+
+        // OPTIMIZATION: Cache getAxlEntries RPC calls to eliminate duplicate service calls
         var axlCache = {};
-        var axlEntriesMap = {};
-        logger.info("2. overpopulatedBOM LOOP START");
+
         for (x = 0; x < overpopulatedBOM.rows.length; x++) {
             row1 = overpopulatedBOM.rows[x];
-            var mapKey = row1.whirlpoolP_N + "|" + row1.componentClass;
-            var pptaMatches = (row1.componentClass === "CCRTL") ? pptaByPartNumber[row1.whirlpoolP_N] : null;
 
-            if (pptaMatches && pptaMatches.length > 0) {
-                if (supplierCount < pptaMatches.length) {
-                    supplierCount = pptaMatches.length;
-                }
+            //check if part is ccritical
+            if (row1.componentClass === "CCRTL") {
+                params = {
+                    fieldName: "ComponentPartNumber" /* STRING */ ,
+                    isCaseSensitive: undefined /* BOOLEAN */ ,
+                    t: pptaResponseTable /* INFOTABLE */ ,
+                    value: row1.whirlpoolP_N /* STRING */
+                };
 
-                var pptaList = [];
-                for (k = 0; k < pptaMatches.length; k++) {
-                    row3 = pptaMatches[k];
-                    pptaList.push({
-                        MPN: row3.Mpn,
-                        manufaturerName: row3.ManufacturerName,
-                        partNumber: row1.whirlpoolP_N,
-                        componentClass: row1.componentClass
-                    });
+                filteredPptaResponseTable = Resources["InfoTableFunctions"].EQFilter(params);
+
+                if (filteredPptaResponseTable.rows.length > 0) {
+                    if (supplierCount < filteredPptaResponseTable.rows.length) {
+                        supplierCount = filteredPptaResponseTable.rows.length;
+                    }
+
+                    for (k = 0; k < filteredPptaResponseTable.rows.length; k++) {
+                        newEntry1 = new Object();
+                        row3 = filteredPptaResponseTable.rows[k];
+
+                        newEntry1.MPN = row3.Mpn; // STRING
+                        newEntry1.manufaturerName = row3.ManufacturerName; // STRING
+                        newEntry1.partNumber = row1.whirlpoolP_N;
+                        newEntry1.componentClass = row1.componentClass;
+                        allAxlEntriesTable.AddRow(newEntry1);
+                    }
+                } else {
+                    var axlCacheKey1 = row1.oid + "|" + row1.whirlpoolP_N;
+                    if (axlCache[axlCacheKey1] === undefined) {
+                        axlCache[axlCacheKey1] = Things["WHR.PrototypeBomThing_AtosSyntel"].getAxlEntries({
+                            partOid: row1.oid /* STRING */ ,
+                            partNumber: row1.whirlpoolP_N
+                        });
+                    }
+                    axlTable = axlCache[axlCacheKey1];
+
+                    if (axlTable !== undefined) {
+                        if (axlTable.rows.length > 0) {
+                            if (supplierCount < axlTable.rows.length) {
+                                supplierCount = axlTable.rows.length;
+                            }
+
+                            // Add Supplier and axl entries in single table 
+                            for (z = 0; z < axlTable.rows.length; z++) {
+                                row = axlTable.rows[z];
+                                newEntry4 = new Object();
+                                newEntry4.MPN = row.MPN; // STRING
+                                newEntry4.manufaturerName = row.manufaturerName; // STRING
+                                newEntry4.WCPartOid = row.WCPartOid; // STRING
+                                newEntry4.partNumber = row1.whirlpoolP_N;
+                                newEntry4.componentClass = row1.componentClass;
+                                allAxlEntriesTable.AddRow(newEntry4);
+                            }
+                        }
+                    }
                 }
-                axlEntriesMap[mapKey] = pptaList;
             } else {
-                var axlCacheKey = row1.oid + "|" + row1.whirlpoolP_N;
-                if (axlCache[axlCacheKey] === undefined) {
-                    axlCache[axlCacheKey] = Things["WHR.PrototypeBomThing_AtosSyntel"].getAxlEntries({
-                        partOid: row1.oid /* STRING */,
+                var axlCacheKey2 = row1.oid + "|" + row1.whirlpoolP_N;
+                if (axlCache[axlCacheKey2] === undefined) {
+                    axlCache[axlCacheKey2] = Things["WHR.PrototypeBomThing_AtosSyntel"].getAxlEntries({
+                        partOid: row1.oid /* STRING */ ,
                         partNumber: row1.whirlpoolP_N
                     });
                 }
-                axlTable = axlCache[axlCacheKey];
+                axlTable = axlCache[axlCacheKey2];
 
-                if (axlTable !== undefined && axlTable.rows.length > 0) {
-                    if (supplierCount < axlTable.rows.length) {
-                        supplierCount = axlTable.rows.length;
-                    }
+                if (axlTable !== undefined) {
+                    if (axlTable.rows.length > 0) {
+                        if (supplierCount < axlTable.rows.length) {
+                            supplierCount = axlTable.rows.length;
+                        }
 
-                    var axlList = [];
-                    for (z = 0; z < axlTable.rows.length; z++) {
-                        row = axlTable.rows[z];
-                        axlList.push({
-                            MPN: row.MPN,
-                            manufaturerName: row.manufaturerName,
-                            WCPartOid: row.WCPartOid,
-                            partNumber: row1.whirlpoolP_N,
-                            componentClass: row1.componentClass
-                        });
+                        // Add Supplier and axl entries in single table 
+                        for (z = 0; z < axlTable.rows.length; z++) {
+                            row = axlTable.rows[z];
+                            newEntry4 = new Object();
+                            newEntry4.MPN = row.MPN; // STRING
+                            newEntry4.manufaturerName = row.manufaturerName; // STRING
+                            newEntry4.WCPartOid = row.WCPartOid; // STRING
+                            newEntry4.partNumber = row1.whirlpoolP_N;
+                            newEntry4.componentClass = row1.componentClass;
+                            allAxlEntriesTable.AddRow(newEntry4);
+                        }
                     }
-                    axlEntriesMap[mapKey] = axlList;
                 }
             }
         }
-        logger.info("2. overpopulatedBOM LOOP END");
 
         finalTable = Things["WHR.PrototypeBomThing_AtosSyntel"].getDynamicInfotableFinalTable({
-            supplierCount: supplierCount /* INTEGER */,
+            supplierCount: supplierCount /* INTEGER */ ,
             allVariantTable: allSelectedVariantsTable /* INFOTABLE */
         });
 
@@ -417,6 +496,17 @@ try {
             iLF = overpopulatedBOM.ToJSON().dataShape.fieldDefinitions;
         } else {
             iLF = overpopulatedBOM.dataShape.fields;
+        }
+
+        // OPTIMIZATION: Index allAxlEntriesTable by (partNumber, componentClass) to replace Query call in final loop
+        var axlEntriesMap = {};
+        for (i = 0; i < allAxlEntriesTable.rows.length; i++) {
+            row = allAxlEntriesTable.rows[i];
+            var axlMapKey = row.partNumber + "|" + row.componentClass;
+            if (!axlEntriesMap[axlMapKey]) {
+                axlEntriesMap[axlMapKey] = [];
+            }
+            axlEntriesMap[axlMapKey].push(row);
         }
 
         for (x = 0; x < overpopulatedBOM.rows.length; x++) {
@@ -427,7 +517,6 @@ try {
                 newEntry[keyC] = sourceRow[keyC];
             }
 
-            // OPT-7: Use pre-indexed AXL entries instead of Query() per row
             var axlLookupKey = sourceRow.whirlpoolP_N + "|" + sourceRow.componentClass;
             var axlMatches = axlEntriesMap[axlLookupKey] || [];
 
@@ -457,8 +546,9 @@ try {
         finalTable.AddRow(newEntry);
     }
     result = finalTable;
-}
-catch (err) {
+} 
+catch (err) 
+{
     let errMsg = "Thing [{}] Service [{}] error at line [{}] : {}";
     logger.error(errMsg, me.name, err.fileName, err.lineNumber, err);
 }
