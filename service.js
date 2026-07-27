@@ -1,8 +1,8 @@
 /*
 Author: ANSARNA
 CreatedOn: 24 July, 2026
-LastEdited:
-ChangeLog:
+LastEdited: 27 July, 2026
+ChangeLog: Performance optimization - replaced O(n²) InfoTable queries with hash-map lookups
 */
 
 try 
@@ -80,11 +80,14 @@ try
         logger.info("PrototypeBOM filter CCTRLcomponetnts " + masterBom.rows.length);
         ecadcCRTLTable = Resources["InfoTableFunctions"].EQFilter(params);
 
+        // OPT-1: Build hash set for O(1) CCRTL refDes lookup instead of string indexOf
+        var cCRTLSet = {};
         cCRTLString = "";
         logger.info("PrototypeBOM start loop on cctrTbl");
         for (i = 0; i < ecadcCRTLTable.rows.length; i++) {
             ecadcCRTLRow = ecadcCRTLTable.rows[i];
             cCRTLString = ecadcCRTLRow.refDes + "," + cCRTLString;
+            cCRTLSet[ecadcCRTLRow.refDes] = true;
         }
 
         // If C-CRTL == YES, then add to a  cCriticalTable.  cCriticalTable is sent to PPTA later.
@@ -149,7 +152,8 @@ try
                 //Overwrite CCritical component Class
                 newEntry.componentClass = variantRow.componentClass; // STRING 
 
-                if (cCRTLString.indexOf(variantRow.refDes + ",") !== -1) {
+                // OPT-1: Use hash set instead of cCRTLString.indexOf()
+                if (cCRTLSet[variantRow.refDes] === true) {
                     newEntry.componentClass = "CCRTL";
                 }
                 //newEntry.PPL = variantRow.PPL; // STRING
@@ -159,99 +163,87 @@ try
         }
 
 
-        params = {
-            t: consolidatedBom /* INFOTABLE */ ,
-            columns: "whirlpoolP_N,componentClass" /* STRING */
-        };
+        // OPT-2: Replace Distinct + Query loop with single-pass hash map
+        // Original called Distinct() then Query() for each distinct row — O(distinct × total).
+        // Now a single pass keeps the first row per unique (whirlpoolP_N, componentClass) key.
         logger.info("PrototypeBOM consolidatedBOM " + consolidatedBom.getRows());
-        distinctConsolidatedBom = Resources["InfoTableFunctions"].Distinct(params);
-
-        for (i = 0; i < distinctConsolidatedBom.rows.length; i++) {
-            query = {
-                "filters": {
-                    "type": "And",
-                    "filters": [{
-                        "type": "EQ",
-                        "fieldName": "whirlpoolP_N",
-                        "value": distinctConsolidatedBom.rows[i].whirlpoolP_N
-                    },
-                                {
-                                    "type": "EQ",
-                                    "fieldName": "componentClass",
-                                    "value": distinctConsolidatedBom.rows[i].componentClass
-                                }
-                               ]
-                }
-            };
-
-            params = {
-                t: consolidatedBom /* INFOTABLE */ ,
-                query: query /* QUERY */
-            };
-
-            tempResult = Resources["InfoTableFunctions"].Query(params);    
-            if (tempResult.rows.length > 0) {
-                tempTable.AddRow(tempResult.rows[0]);
+        var distinctMap = {};
+        for (i = 0; i < consolidatedBom.rows.length; i++) {
+            row = consolidatedBom.rows[i];
+            var dKey = row.whirlpoolP_N + "|" + row.componentClass;
+            if (!distinctMap[dKey]) {
+                distinctMap[dKey] = true;
+                tempTable.AddRow(row);
             }
         }
 
+        // OPT-3: Pre-apply CCRTL overwrite to all variant BOM rows (one-time pass)
+        // and pre-build per-variant lookup maps for O(1) access in main loop.
+        // Original re-applied CCRTL overwrite and called Query() inside O(parts × variants) loop.
+        var variantBomMaps = [];
+        for (i = 0; i < allConsolidatedBomsTableLength; i++) {
+            allBomsRow = allBomsInSingleTable.rows[i];
+            var vBom = allBomsRow.variantTable;
+            var vMap = {};
 
+            for (var n = 0; n < vBom.rows.length; n++) {
+                variantRow = vBom.rows[n];
+                // Apply CCRTL overwrite once (original did this redundantly every outer iteration)
+                if (cCRTLSet[variantRow.refDes] === true) {
+                    variantRow.componentClass = "CCRTL";
+                }
+                var vKey = variantRow.whirlpoolP_N + "|" + variantRow.componentClass;
+                if (!vMap[vKey]) {
+                    vMap[vKey] = [];
+                }
+                vMap[vKey].push(variantRow);
+            }
+
+            variantBomMaps.push({
+                variantId: allBomsRow.variantId,
+                map: vMap
+            });
+        }
+
+        // OPT-4: Pre-build masterBom lookup map for totalPopQty — O(1) instead of EQFilter per part
+        var masterBomQtyMap = {};
+        for (i = 0; i < masterBom.rows.length; i++) {
+            row = masterBom.rows[i];
+            if (!masterBomQtyMap[row.whirlpoolP_N]) {
+                masterBomQtyMap[row.whirlpoolP_N] = row.quantity;
+            }
+        }
 
         for (x = 0; x < tempTable.rows.length; x++) {
             consolidatedBomRow = tempTable.rows[x];
 
             newEntry = new Object();
+            var lookupKey = consolidatedBomRow.whirlpoolP_N + "|" + consolidatedBomRow.componentClass;
 
             for (i = 0; i < allConsolidatedBomsTableLength; i++) {
-                allBomsRow = allBomsInSingleTable.rows[i];
-                variantBom = allBomsRow.variantTable;
-                for (n = 0; n < variantBom.rows.length; n++) {
-                    variantRow = variantBom.rows[n];
-                    if (cCRTLString.indexOf(variantRow.refDes + ",") !== -1) {
-                        variantRow.componentClass = "CCRTL";
-                    }
-                }
-                query = {
-                    "filters": {
-                        "type": "And",
-                        "filters": [{
-                            "type": "EQ",
-                            "fieldName": "whirlpoolP_N",
-                            "value": consolidatedBomRow.whirlpoolP_N
-                        },
-                                    {
-                                        "type": "EQ",
-                                        "fieldName": "componentClass",
-                                        "value": consolidatedBomRow.componentClass
-                                    }
-                                   ]
-                    }
-                };
+                // OPT-3: Use pre-built variant BOM maps instead of Query()
+                var matchingRows = variantBomMaps[i].map[lookupKey];
 
-                params = {
-                    t: variantBom /* INFOTABLE */ ,
-                    query: query /* QUERY */
-                };
-                samePartExhistTable = Resources["InfoTableFunctions"].Query(params);
-                if (samePartExhistTable.rows.length <= 0) {
-                    variantRefField = allBomsRow.variantId + " RefDes";
+                if (!matchingRows || matchingRows.length <= 0) {
+                    variantRefField = variantBomMaps[i].variantId + " RefDes";
                     newEntry[variantRefField] = "";
-                    variantQtyField = allBomsRow.variantId + " Qty";
+                    variantQtyField = variantBomMaps[i].variantId + " Qty";
                     newEntry[variantQtyField] = "";
                 } else {
                     refDesCSV = " ";
 
-                    // Sort RefDes table that CSV is also sorted
-                    sort = new Object();
-                    sort.name = "refDes";
-                    sort.ascending = true;
-                    samePartExhistTable.Sort(sort);
+                    // Sort matching rows by refDes ascending to match original InfoTable Sort behavior
+                    matchingRows.sort(function(a, b) {
+                        var aVal = a.refDes || "";
+                        var bVal = b.refDes || "";
+                        return aVal < bVal ? -1 : aVal > bVal ? 1 : 0;
+                    });
 
-                    for (j = 0; j < samePartExhistTable.rows.length; j++) {
-                        samePartExhistTableRow = samePartExhistTable.rows[j];
+                    for (j = 0; j < matchingRows.length; j++) {
+                        samePartExhistTableRow = matchingRows[j];
 
                         if (samePartExhistTableRow.refDes !== undefined) {
-                            //>>>>>>>>>>>>>>>>>>>>>>>>>><<<<<<<<<<<<<<<<<<<<<
+                            //>>>>>>>>>>>>>>>>>>>>>>>>>>><<<<<<<<<<<<<<<<<<<<<
                             for (z = 1; z < samePartExhistTableRow.refDes.length; z++) {
                                 var fnd = samePartExhistTableRow.refDes.indexOf(",", z);
 
@@ -288,9 +280,9 @@ try
                     refArray.sort(sortAlphaNum);
                     refDesCSV = refArray.toString();
 
-                    variantRefField = allBomsRow.variantId + " RefDes";
+                    variantRefField = variantBomMaps[i].variantId + " RefDes";
                     newEntry[variantRefField] = refDesCSV;
-                    variantQtyField = allBomsRow.variantId + " Qty";
+                    variantQtyField = variantBomMaps[i].variantId + " Qty";
                     //newEntry[variantQtyField] = samePartExhistTable.rows[0].quantity;
                     refDesForTPQ = refDesForTPQ.toString();
                     newEntry[variantQtyField] = refDesForTPQ.split(".")[0];
@@ -312,19 +304,12 @@ try
             newEntry.componentClass = consolidatedBomRow.componentClass; // STRING
             newEntry.oid = consolidatedBomRow.oid;
             //logger.info(" consolidatedBomRow " + consolidatedBomRow.whirlpoolP_N + "," + consolidatedBomRow.componentClass + "," + consolidatedBomRow.oid);
-            params = {
-                fieldName: "whirlpoolP_N" /* STRING */ ,
-                isCaseSensitive: undefined /* BOOLEAN */ ,
-                t: masterBom /* INFOTABLE */ ,
-                value: consolidatedBomRow.whirlpoolP_N /* STRING */
-            };
 
-            totalPopulationQtyTable = Resources["InfoTableFunctions"].EQFilter(params);
-
-
-            if (totalPopulationQtyTable.rows.length > 0) {
-                newEntry.totalPopQty = totalPopulationQtyTable.rows[0].quantity;
+            // OPT-4: Use pre-built masterBom map instead of EQFilter per part
+            if (masterBomQtyMap[consolidatedBomRow.whirlpoolP_N] !== undefined) {
+                newEntry.totalPopQty = masterBomQtyMap[consolidatedBomRow.whirlpoolP_N];
             }
+
             // add cCritical parts in a seprate table 
             if (consolidatedBomRow.componentClass === "CCRTL") {
                 newEntry3 = new Object();
@@ -383,6 +368,19 @@ try
             logger.error("Cant get data from PPTA " + err);
         }
 
+        // OPT-5: Pre-index pptaResponseTable by ComponentPartNumber for O(1) lookup
+        // Replaces per-row EQFilter calls in the AXL loop below
+        var pptaByPartNumber = {};
+        if (pptaResponseTable !== undefined) {
+            for (i = 0; i < pptaResponseTable.rows.length; i++) {
+                row = pptaResponseTable.rows[i];
+                if (!pptaByPartNumber[row.ComponentPartNumber]) {
+                    pptaByPartNumber[row.ComponentPartNumber] = [];
+                }
+                pptaByPartNumber[row.ComponentPartNumber].push(row);
+            }
+        }
+
         // add all axl entries in single table
         params = {
             infoTableName: "InfoTable",
@@ -391,28 +389,25 @@ try
 
         allAxlEntriesTable = Resources["InfoTableFunctions"].CreateInfoTableFromDataShape(params);
 
+        // OPT-6: Cache getAxlEntries() RPC calls to avoid duplicate calls for same part
+        var axlCache = {};
+
         for (x = 0; x < overpopulatedBOM.rows.length; x++) {
             row1 = overpopulatedBOM.rows[x];
 
             //check if part is ccritical
             if (row1.componentClass === "CCRTL") {
-                params = {
-                    fieldName: "ComponentPartNumber" /* STRING */ ,
-                    isCaseSensitive: undefined /* BOOLEAN */ ,
-                    t: pptaResponseTable /* INFOTABLE */ ,
-                    value: row1.whirlpoolP_N /* STRING */
-                };
+                // OPT-5: Use pre-indexed pptaResponseTable instead of EQFilter
+                var pptaMatches = pptaByPartNumber[row1.whirlpoolP_N];
 
-                filteredPptaResponseTable = Resources["InfoTableFunctions"].EQFilter(params);
-
-                if (filteredPptaResponseTable.rows.length > 0) {
-                    if (supplierCount < filteredPptaResponseTable.rows.length) {
-                        supplierCount = filteredPptaResponseTable.rows.length;
+                if (pptaMatches && pptaMatches.length > 0) {
+                    if (supplierCount < pptaMatches.length) {
+                        supplierCount = pptaMatches.length;
                     }
 
-                    for (k = 0; k < filteredPptaResponseTable.rows.length; k++) {
+                    for (k = 0; k < pptaMatches.length; k++) {
                         newEntry1 = new Object();
-                        row3 = filteredPptaResponseTable.rows[k];
+                        row3 = pptaMatches[k];
 
                         newEntry1.MPN = row3.Mpn; // STRING
                         newEntry1.manufaturerName = row3.ManufacturerName; // STRING
@@ -421,10 +416,15 @@ try
                         allAxlEntriesTable.AddRow(newEntry1);
                     }
                 } else {
-                    axlTable = Things["WHR.PrototypeBomThing_AtosSyntel"].getAxlEntries({
-                        partOid: row1.oid /* STRING */ ,
-                        partNumber: row1.whirlpoolP_N
-                    });
+                    // OPT-6: Use cached AXL entries to avoid redundant RPC calls
+                    var axlCacheKey = row1.oid + "|" + row1.whirlpoolP_N;
+                    if (axlCache[axlCacheKey] === undefined) {
+                        axlCache[axlCacheKey] = Things["WHR.PrototypeBomThing_AtosSyntel"].getAxlEntries({
+                            partOid: row1.oid /* STRING */ ,
+                            partNumber: row1.whirlpoolP_N
+                        });
+                    }
+                    axlTable = axlCache[axlCacheKey];
 
                     if (axlTable !== undefined) {
                         if (axlTable.rows.length > 0) {
@@ -447,10 +447,15 @@ try
                     }
                 }
             } else {
-                axlTable = Things["WHR.PrototypeBomThing_AtosSyntel"].getAxlEntries({
-                    partOid: row1.oid /* STRING */ ,
-                    partNumber: row1.whirlpoolP_N
-                });
+                // OPT-6: Use cached AXL entries to avoid redundant RPC calls
+                var axlCacheKey2 = row1.oid + "|" + row1.whirlpoolP_N;
+                if (axlCache[axlCacheKey2] === undefined) {
+                    axlCache[axlCacheKey2] = Things["WHR.PrototypeBomThing_AtosSyntel"].getAxlEntries({
+                        partOid: row1.oid /* STRING */ ,
+                        partNumber: row1.whirlpoolP_N
+                    });
+                }
+                axlTable = axlCache[axlCacheKey2];
 
                 if (axlTable !== undefined) {
                     if (axlTable.rows.length > 0) {
@@ -474,6 +479,18 @@ try
             }
         }
 
+        // OPT-7: Pre-index allAxlEntriesTable by (partNumber, componentClass) for O(1) lookup
+        // Replaces per-row Query() calls in the final table assembly loop below
+        var axlEntriesMap = {};
+        for (i = 0; i < allAxlEntriesTable.rows.length; i++) {
+            row = allAxlEntriesTable.rows[i];
+            var axlMapKey = row.partNumber + "|" + row.componentClass;
+            if (!axlEntriesMap[axlMapKey]) {
+                axlEntriesMap[axlMapKey] = [];
+            }
+            axlEntriesMap[axlMapKey].push(row);
+        }
+
         finalTable = Things["WHR.PrototypeBomThing_AtosSyntel"].getDynamicInfotableFinalTable({
             supplierCount: supplierCount /* INTEGER */ ,
             allVariantTable: allSelectedVariantsTable /* INFOTABLE */
@@ -492,33 +509,14 @@ try
             for (keyC in iLF) {
                 newEntry[keyC] = sourceRow[keyC];
             }
-            query = {
-                "filters": {
-                    "type": "And",
-                    "filters": [{
-                        "type": "EQ",
-                        "fieldName": "partNumber",
-                        "value": sourceRow.whirlpoolP_N
-                    },
-                                {
-                                    "type": "EQ",
-                                    "fieldName": "componentClass",
-                                    "value": sourceRow.componentClass
-                                }
-                               ]
-                }
-            };
 
-            params = {
-                t: allAxlEntriesTable /* INFOTABLE */ ,
-                query: query /* QUERY */
-            };
-
-            axlSamePartExhistTable = Resources["InfoTableFunctions"].Query(params);
+            // OPT-7: Use pre-indexed AXL entries instead of Query() per row
+            var axlLookupKey = sourceRow.whirlpoolP_N + "|" + sourceRow.componentClass;
+            var axlMatches = axlEntriesMap[axlLookupKey] || [];
 
             countAxl = 1;
-            for (i = 0; i < axlSamePartExhistTable.rows.length; i++) {
-                row1 = axlSamePartExhistTable.rows[i];
+            for (i = 0; i < axlMatches.length; i++) {
+                row1 = axlMatches[i];
 
                 supplierField = "Supplier " + countAxl;
                 newEntry[supplierField] = row1.manufaturerName;
