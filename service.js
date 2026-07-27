@@ -58,11 +58,9 @@ try
         try 
         {
             //get Master Bom
-            logger.info("PrototypeBOM get master BOM start");
             masterBom = me.getBomInfotableForPrototypeBom({
                 WTPartOid: masterOid /* STRING */
             });
-            logger.info("PrototypeBOM get master BOM stop");
         } 
         catch (err) 
         {
@@ -77,13 +75,11 @@ try
             t: masterBom /* INFOTABLE */ ,
             value: "CCRTL" /* STRING */
         };
-        logger.info("PrototypeBOM filter CCTRLcomponetnts " + masterBom.rows.length);
         ecadcCRTLTable = Resources["InfoTableFunctions"].EQFilter(params);
 
         // OPT-1: Build hash set for O(1) CCRTL refDes lookup instead of string indexOf
         var cCRTLSet = {};
         cCRTLString = "";
-        logger.info("PrototypeBOM start loop on cctrTbl");
         for (i = 0; i < ecadcCRTLTable.rows.length; i++) {
             ecadcCRTLRow = ecadcCRTLTable.rows[i];
             cCRTLString = ecadcCRTLRow.refDes + "," + cCRTLString;
@@ -125,18 +121,16 @@ try
 
             selectedVariantTable.AddRow(newEntry);
         }
-
-        logger.info("PrototypeBOM generate dynamicInfotable start");
         overpopulatedBOM = Things["WHR.PrototypeBomThing_AtosSyntel"].getDynamicInfotable({
             allVariantTable: selectedVariantTable /* INFOTABLE */
         });
-        logger.info("PrototypeBOM generate dynamicInfotable stop and addallinfotablesin one table start");
+        logger.info("1. allBomsInSingleTable START");
         allBomsInSingleTable = Things["WHR.PrototypeBomThing_AtosSyntel"].addAllInfotablesInOneTable({
             selectedVariantInfotable: selectedVariantTable /* INFOTABLE */
         });
-        logger.info("PrototypeBOM generate dynamicInfotable stop and addallinfotablesin one table stop");
+        logger.info("1. allBomsInSingleTable END");
+        
         allConsolidatedBomsTableLength = allBomsInSingleTable.rows.length;
-
         for (i = 0; i < allConsolidatedBomsTableLength; i++) {
             allBomsRow = allBomsInSingleTable.rows[i];
             variantBomMain = allBomsRow.variantTable;
@@ -161,12 +155,6 @@ try
                 consolidatedBom.AddRow(newEntry);
             }
         }
-
-
-        // OPT-2: Replace Distinct + Query loop with single-pass hash map
-        // Original called Distinct() then Query() for each distinct row — O(distinct × total).
-        // Now a single pass keeps the first row per unique (whirlpoolP_N, componentClass) key.
-        logger.info("PrototypeBOM consolidatedBOM " + consolidatedBom.getRows());
         var distinctMap = {};
         for (i = 0; i < consolidatedBom.rows.length; i++) {
             row = consolidatedBom.rows[i];
@@ -176,10 +164,6 @@ try
                 tempTable.AddRow(row);
             }
         }
-
-        // OPT-3: Pre-apply CCRTL overwrite to all variant BOM rows (one-time pass)
-        // and pre-build per-variant lookup maps for O(1) access in main loop.
-        // Original re-applied CCRTL overwrite and called Query() inside O(parts × variants) loop.
         var variantBomMaps = [];
         for (i = 0; i < allConsolidatedBomsTableLength; i++) {
             allBomsRow = allBomsInSingleTable.rows[i];
@@ -188,7 +172,6 @@ try
 
             for (var n = 0; n < vBom.rows.length; n++) {
                 variantRow = vBom.rows[n];
-                // Apply CCRTL overwrite once (original did this redundantly every outer iteration)
                 if (cCRTLSet[variantRow.refDes] === true) {
                     variantRow.componentClass = "CCRTL";
                 }
@@ -204,8 +187,6 @@ try
                 map: vMap
             });
         }
-
-        // OPT-4: Pre-build masterBom lookup map for totalPopQty — O(1) instead of EQFilter per part
         var masterBomQtyMap = {};
         if (masterBom !== undefined && masterBom !== null && masterBom.rows !== undefined) {
             for (i = 0; i < masterBom.rows.length; i++) {
@@ -246,7 +227,6 @@ try
                         samePartExhistTableRow = matchingRows[j];
 
                         if (samePartExhistTableRow.refDes !== undefined) {
-                            //>>>>>>>>>>>>>>>>>>>>>>>>>>><<<<<<<<<<<<<<<<<<<<<
                             for (z = 1; z < samePartExhistTableRow.refDes.length; z++) {
                                 var fnd = samePartExhistTableRow.refDes.indexOf(",", z);
 
@@ -306,7 +286,6 @@ try
             newEntry.description = consolidatedBomRow.description; // STRING
             newEntry.componentClass = consolidatedBomRow.componentClass; // STRING
             newEntry.oid = consolidatedBomRow.oid;
-            //logger.info(" consolidatedBomRow " + consolidatedBomRow.whirlpoolP_N + "," + consolidatedBomRow.componentClass + "," + consolidatedBomRow.oid);
 
             // OPT-4: Use pre-built masterBom map instead of EQFilter per part
             var masterPartNo = String(consolidatedBomRow.whirlpoolP_N);
@@ -342,11 +321,6 @@ try
             pptaResponseJSON = Things["WHR.BomAndRiskToolsODataConnectorThing_AtosSyntel"].getManufacturerDetails({
                 InputString: cCriticalTable.ToJSON().rows /* STRING */
             });
-
-            logger.info("Response from ppta for prototype : " + pptaResponseJSON.statusCode);
-            logger.info("Input string for prototype : " + cCriticalTable.ecadPartNumber + "," + cCriticalTable.componentsPartNumber + "," + cCriticalTable.refDes);
-            logger.info("ppta full input string: " + cCriticalTable.ToJSON().rows);
-            logger.info("ppta response " +pptaResponseJSON.rows);
 
             pptaResponseTable = Resources["InfoTableFunctions"].CreateInfoTableFromDataShape({
                 infoTableName: "InfoTable",
@@ -388,7 +362,7 @@ try
         // OPT-6 & OPT-7: Build axlEntriesMap directly in a single pass without intermediate InfoTable overhead
         var axlCache = {};
         var axlEntriesMap = {};
-
+		logger.info("2. overpopulatedBOM LOOP START");
         for (x = 0; x < overpopulatedBOM.rows.length; x++) {
             row1 = overpopulatedBOM.rows[x];
             var mapKey = row1.whirlpoolP_N + "|" + row1.componentClass;
@@ -440,6 +414,7 @@ try
                 }
             }
         }
+		logger.info("2. overpopulatedBOM LOOP END");
 
         finalTable = Things["WHR.PrototypeBomThing_AtosSyntel"].getDynamicInfotableFinalTable({
             supplierCount: supplierCount /* INTEGER */ ,
