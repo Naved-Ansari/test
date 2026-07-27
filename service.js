@@ -180,18 +180,7 @@ try {
                 map: vMap
             });
         }
-        var masterBomQtyMap = {};
-        if (masterBom !== undefined && masterBom !== null && masterBom.rows !== undefined) {
-            for (i = 0; i < masterBom.rows.length; i++) {
-                row = masterBom.rows[i];
-                if (row.whirlpoolP_N !== undefined && row.whirlpoolP_N !== null) {
-                    var pNo = String(row.whirlpoolP_N).trim().toUpperCase();
-                    if (pNo !== "" && masterBomQtyMap[pNo] === undefined) {
-                        masterBomQtyMap[pNo] = row.quantity;
-                    }
-                }
-            }
-        }
+
 
         for (x = 0; x < tempTable.rows.length; x++) {
             consolidatedBomRow = tempTable.rows[x];
@@ -282,26 +271,18 @@ try {
             newEntry.componentClass = consolidatedBomRow.componentClass; // STRING
             newEntry.oid = consolidatedBomRow.oid;
 
-            // OPT-4: Use pre-built masterBom map with EQFilter fallback for 100% accuracy
-            var foundQty = false;
-            if (consolidatedBomRow.whirlpoolP_N !== undefined && consolidatedBomRow.whirlpoolP_N !== null) {
-                var masterPartNo = String(consolidatedBomRow.whirlpoolP_N).trim().toUpperCase();
-                if (masterPartNo !== "" && masterBomQtyMap[masterPartNo] !== undefined) {
-                    newEntry.totalPopQty = masterBomQtyMap[masterPartNo];
-                    foundQty = true;
-                }
-            }
-            if (!foundQty && masterBom !== undefined && masterBom !== null && consolidatedBomRow.whirlpoolP_N !== undefined) {
-                params = {
-                    fieldName: "whirlpoolP_N" /* STRING */ ,
-                    isCaseSensitive: undefined /* BOOLEAN */ ,
-                    t: masterBom /* INFOTABLE */ ,
-                    value: consolidatedBomRow.whirlpoolP_N /* STRING */
-                };
-                totalPopulationQtyTable = Resources["InfoTableFunctions"].EQFilter(params);
-                if (totalPopulationQtyTable.rows.length > 0) {
-                    newEntry.totalPopQty = totalPopulationQtyTable.rows[0].quantity;
-                }
+            params = {
+                fieldName: "whirlpoolP_N" /* STRING */ ,
+                isCaseSensitive: undefined /* BOOLEAN */ ,
+                t: masterBom /* INFOTABLE */ ,
+                value: consolidatedBomRow.whirlpoolP_N /* STRING */
+            };
+
+            totalPopulationQtyTable = Resources["InfoTableFunctions"].EQFilter(params);
+
+
+            if (totalPopulationQtyTable.rows.length > 0) {
+                newEntry.totalPopQty = totalPopulationQtyTable.rows[0].quantity;
             }
 
             // add cCritical parts in a seprate table 
