@@ -381,114 +381,60 @@ try
             }
         }
 
-        // add all axl entries in single table
-        params = {
-            infoTableName: "InfoTable",
-            dataShapeName: "WHR.ManufaturerDetailsFromAxlDS_AtosSyntel"
-        };
-
-        allAxlEntriesTable = Resources["InfoTableFunctions"].CreateInfoTableFromDataShape(params);
-
-        // OPT-6: Cache getAxlEntries() RPC calls to avoid duplicate calls for same part
+        // OPT-6 & OPT-7: Build axlEntriesMap directly in a single pass without intermediate InfoTable overhead
         var axlCache = {};
+        var axlEntriesMap = {};
 
         for (x = 0; x < overpopulatedBOM.rows.length; x++) {
             row1 = overpopulatedBOM.rows[x];
+            var mapKey = row1.whirlpoolP_N + "|" + row1.componentClass;
+            var pptaMatches = (row1.componentClass === "CCRTL") ? pptaByPartNumber[row1.whirlpoolP_N] : null;
 
-            //check if part is ccritical
-            if (row1.componentClass === "CCRTL") {
-                // OPT-5: Use pre-indexed pptaResponseTable instead of EQFilter
-                var pptaMatches = pptaByPartNumber[row1.whirlpoolP_N];
-
-                if (pptaMatches && pptaMatches.length > 0) {
-                    if (supplierCount < pptaMatches.length) {
-                        supplierCount = pptaMatches.length;
-                    }
-
-                    for (k = 0; k < pptaMatches.length; k++) {
-                        newEntry1 = new Object();
-                        row3 = pptaMatches[k];
-
-                        newEntry1.MPN = row3.Mpn; // STRING
-                        newEntry1.manufaturerName = row3.ManufacturerName; // STRING
-                        newEntry1.partNumber = row1.whirlpoolP_N;
-                        newEntry1.componentClass = row1.componentClass;
-                        allAxlEntriesTable.AddRow(newEntry1);
-                    }
-                } else {
-                    // OPT-6: Use cached AXL entries to avoid redundant RPC calls
-                    var axlCacheKey = row1.oid + "|" + row1.whirlpoolP_N;
-                    if (axlCache[axlCacheKey] === undefined) {
-                        axlCache[axlCacheKey] = Things["WHR.PrototypeBomThing_AtosSyntel"].getAxlEntries({
-                            partOid: row1.oid /* STRING */ ,
-                            partNumber: row1.whirlpoolP_N
-                        });
-                    }
-                    axlTable = axlCache[axlCacheKey];
-
-                    if (axlTable !== undefined) {
-                        if (axlTable.rows.length > 0) {
-                            if (supplierCount < axlTable.rows.length) {
-                                supplierCount = axlTable.rows.length;
-                            }
-
-                            // Add Supplier and axl entries in single table 
-                            for (z = 0; z < axlTable.rows.length; z++) {
-                                row = axlTable.rows[z];
-                                newEntry4 = new Object();
-                                newEntry4.MPN = row.MPN; // STRING
-                                newEntry4.manufaturerName = row.manufaturerName; // STRING
-                                newEntry4.WCPartOid = row.WCPartOid; // STRING
-                                newEntry4.partNumber = row1.whirlpoolP_N;
-                                newEntry4.componentClass = row1.componentClass;
-                                allAxlEntriesTable.AddRow(newEntry4);
-                            }
-                        }
-                    }
+            if (pptaMatches && pptaMatches.length > 0) {
+                if (supplierCount < pptaMatches.length) {
+                    supplierCount = pptaMatches.length;
                 }
+
+                var pptaList = [];
+                for (k = 0; k < pptaMatches.length; k++) {
+                    row3 = pptaMatches[k];
+                    pptaList.push({
+                        MPN: row3.Mpn,
+                        manufaturerName: row3.ManufacturerName,
+                        partNumber: row1.whirlpoolP_N,
+                        componentClass: row1.componentClass
+                    });
+                }
+                axlEntriesMap[mapKey] = pptaList;
             } else {
-                // OPT-6: Use cached AXL entries to avoid redundant RPC calls
-                var axlCacheKey2 = row1.oid + "|" + row1.whirlpoolP_N;
-                if (axlCache[axlCacheKey2] === undefined) {
-                    axlCache[axlCacheKey2] = Things["WHR.PrototypeBomThing_AtosSyntel"].getAxlEntries({
+                var axlCacheKey = row1.oid + "|" + row1.whirlpoolP_N;
+                if (axlCache[axlCacheKey] === undefined) {
+                    axlCache[axlCacheKey] = Things["WHR.PrototypeBomThing_AtosSyntel"].getAxlEntries({
                         partOid: row1.oid /* STRING */ ,
                         partNumber: row1.whirlpoolP_N
                     });
                 }
-                axlTable = axlCache[axlCacheKey2];
+                axlTable = axlCache[axlCacheKey];
 
-                if (axlTable !== undefined) {
-                    if (axlTable.rows.length > 0) {
-                        if (supplierCount < axlTable.rows.length) {
-                            supplierCount = axlTable.rows.length;
-                        }
-
-                        // Add Supplier and axl entries in single table 
-                        for (z = 0; z < axlTable.rows.length; z++) {
-                            row = axlTable.rows[z];
-                            newEntry4 = new Object();
-                            newEntry4.MPN = row.MPN; // STRING
-                            newEntry4.manufaturerName = row.manufaturerName; // STRING
-                            newEntry4.WCPartOid = row.WCPartOid; // STRING
-                            newEntry4.partNumber = row1.whirlpoolP_N;
-                            newEntry4.componentClass = row1.componentClass;
-                            allAxlEntriesTable.AddRow(newEntry4);
-                        }
+                if (axlTable !== undefined && axlTable.rows.length > 0) {
+                    if (supplierCount < axlTable.rows.length) {
+                        supplierCount = axlTable.rows.length;
                     }
+
+                    var axlList = [];
+                    for (z = 0; z < axlTable.rows.length; z++) {
+                        row = axlTable.rows[z];
+                        axlList.push({
+                            MPN: row.MPN,
+                            manufaturerName: row.manufaturerName,
+                            WCPartOid: row.WCPartOid,
+                            partNumber: row1.whirlpoolP_N,
+                            componentClass: row1.componentClass
+                        });
+                    }
+                    axlEntriesMap[mapKey] = axlList;
                 }
             }
-        }
-
-        // OPT-7: Pre-index allAxlEntriesTable by (partNumber, componentClass) for O(1) lookup
-        // Replaces per-row Query() calls in the final table assembly loop below
-        var axlEntriesMap = {};
-        for (i = 0; i < allAxlEntriesTable.rows.length; i++) {
-            row = allAxlEntriesTable.rows[i];
-            var axlMapKey = row.partNumber + "|" + row.componentClass;
-            if (!axlEntriesMap[axlMapKey]) {
-                axlEntriesMap[axlMapKey] = [];
-            }
-            axlEntriesMap[axlMapKey].push(row);
         }
 
         finalTable = Things["WHR.PrototypeBomThing_AtosSyntel"].getDynamicInfotableFinalTable({
